@@ -1,5 +1,8 @@
 FROM python:3.11-slim
+# curl/unzip/ca-certificates + Deno: yt-dlp needs a JavaScript runtime to download from YouTube.
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core fonts-liberation \
+        curl unzip ca-certificates \
+    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt requirements-whisper.txt requirements-vision.txt ./
