@@ -97,6 +97,7 @@ fun HomeScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
                 Text("Import videos", fontWeight = FontWeight.SemiBold)
             }
         }
+        item { LinkImportSection(vm) }
         item {
             val url = vm.prefs.backendUrl
             CardBox {
