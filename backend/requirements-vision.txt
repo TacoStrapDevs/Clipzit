@@ -1,0 +1,3 @@
+# Optional face-aware framing (OpenCV 4.x ships the Haar face model).
+opencv-python-headless>=4.8,<5
+numpy>=1.26

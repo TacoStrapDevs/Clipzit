@@ -1,0 +1,29 @@
+name: Backend
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements-dev.txt
+      - name: Byte-compile
+        working-directory: backend
+        run: python -m compileall -q clipzit
+      - name: Tests (real FFmpeg rendering, API integration)
+        working-directory: backend
+        run: python -m unittest discover -s tests -t . -v
+      - name: Docker image builds
+        run: docker build -t clipzit-backend ./backend

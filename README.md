@@ -1,0 +1,153 @@
+# Clipzit
+
+Turn long videos into short clips. Clipzit is an **Android app** (Kotlin, Jetpack Compose, Media3, Room, WorkManager)
+plus a **self-hosted Python backend** (FastAPI, FFmpeg, Faster-Whisper, optional OpenCV) that finds the best moments.
+
+<img src="assets/clipzit-logo.jpg" width="96" alt="Clipzit logo">
+
+## How clips are chosen
+
+The backend transcribes the video (word-level timestamps), splits it into sentences, and scores every sentence-aligned
+window of the requested length. Nothing is random; every score comes from signals you can see in the app (the
+"Score breakdown" bars in the editor):
+
+* **Hook**: question, numbers and stakes words, direct address, curiosity-loop / contrarian / "three things" / personal-story
+  openers; penalises mid-thought starts, fillers and "welcome back" intros.
+* **Complete story**: whole sentences at both ends, a clear conclusion, a question that gets answered, a setup → turn → payoff
+  arc; penalises sign-offs, call-to-action boilerplate and endings that drift into an unrelated tangent.
+* **Stays on topic**: TextTiling-style topic similarity, so clips begin and end where the topic shifts.
+* **Information**: figures, names, and how *distinctive* the vocabulary is within this video (IDF), so the unusual,
+  substantive material beats repeated chatter.
+* **Delivery**: loudness and dynamics of the speech relative to the rest of the video (needs numpy).
+* **Clarity, emotion, standalone context, pacing, length fit.**
+
+Intro/outro boilerplate windows are rejected outright, overlapping and repeated material is removed, boundaries never cut a
+word, and each clip explains *why* it was picked and how to improve it.
+
+**What this is and is not.** The score is an *estimated content-quality indicator* built from the transcript and audio.
+No tool, including this one, OpusClip or Wayin, can promise views: that depends on the channel, topic, audience,
+thumbnail/title, platform algorithm and timing. I have not benchmarked Clipzit against OpusClip or Wayin and make no claim
+that it clips better; it is tested only on synthetic and hand-written transcripts, not on real-world viewing data.
+
+## Features
+
+| Area | Where | Status |
+|---|---|---|
+| Redesigned UI: video thumbnails, score rings, TOP PICK badge, per-signal score bars, live framing frame and caption preview over the video, onboarding steps | Android | implemented, never rendered on a device |
+| Import one or many videos (Storage Access Framework, no storage permission) | Android | implemented |
+| Preview, trim (range slider, 0.1 s nudges, set to playhead), tap timeline, undo/redo, auto-save | Android | implemented |
+| Split at playhead, duplicate clip, manual clips, saved projects (Room) | Android | implemented |
+| Reframe 9:16 / 1:1 / 16:9 / 4:5 with crop position; on-device MP4 (H.264/AAC) via Media3 Transformer; save / share | Android, offline | implemented |
+| Resumable chunked upload (survives dropped connections and restarts), job polling, cancel, retry | Android + backend | implemented |
+| Background tracking with WorkManager and a notification when clips are ready | Android | implemented |
+| Regenerate suggestions without re-uploading or re-transcribing | both | implemented |
+| Transcript keyword search, "clip from here" | both | implemented |
+| Assistant panel: why chosen, improvements, verbatim hook options, titles, hashtags, description excerpt, better start/end suggestions | both | implemented (rule-based, no LLM) |
+| Export history (success and failures), save/share/delete | Android | implemented |
+| Transcription quality presets (Performance / Balanced / Quality = Whisper tiny / base / small) and language | both | implemented |
+| Backend render: 7 caption presets (creator, bold, karaoke, highlight, clean, minimal, professional), word highlighting, hook overlay, watermark text | backend | implemented, tested with real FFmpeg |
+| Pause shortening (light/medium/strong) and filler-word removal with captions re-timed, never cutting words | backend | implemented, tested |
+| Face-following crop (OpenCV, 1 sample/s, dead-band so it never jitters) | backend, optional | crop-path and moving-crop render tested; **Haar face detection itself not tested on real faces** |
+| Platform presets (TikTok, Shorts, Reels, Facebook, vertical) with length warnings; blurred-background fit mode; zoom | both | implemented |
+| Brightness / contrast / saturation / sharpen, loudness normalisation, fades, background music from your own audio | backend | implemented, tested |
+| Multi-clip ZIP (MP4 + SRT + JSON metadata per clip, manifest) honouring your trims | both | implemented |
+| Optional API token, upload limits, extension and ffprobe validation, restart recovery of interrupted jobs | backend | implemented |
+
+## Known limitations (please read)
+
+* **The Android app has never been compiled or run by the author of this archive.** It was written without an Android
+  SDK. Build it with the included GitHub Actions workflow or Android Studio; compile errors are possible even though
+  none are known. No device or emulator testing was done: screen sizes, low memory, Android 8+ behaviour, Media3 export
+  quality and the PlayerView preview are unverified. Upgrading from the earlier 1.0 build resets local projects (the
+  database schema changed).
+* The FastAPI HTTP layer was exercised through a stub (handler logic, which found and fixed a real bug) but the
+  FastAPI integration tests (`backend/tests/test_api.py`, 6 tests) were **not run** here because FastAPI could not be
+  installed offline. They run in CI.
+* Faster-Whisper transcription was never run (model download needs internet). Without it, upload a transcript JSON.
+* Not implemented: on-device Whisper / on-device AI and GPU options; speaker diarization and audio-based active-speaker
+  detection (face framing follows the largest face); burned-in captions in the *on-device* export (use the backend
+  render); caption text editing; free-form text overlays; audio waveform; brand kit (fonts/logos); LLM-written hooks
+  (hooks are verbatim transcript sentences by design); multi-video analysis queue UI (the server queues jobs one at a
+  time, the app starts them one project at a time).
+* Notifications need the Android 13+ permission; if declined, processing still completes.
+
+## Performance and reliability notes
+
+* Clip discovery scores 2 hours of speech in about 2 seconds; the cost of a job is transcription, not scoring.
+* Audio is decoded once for analysis (silence and delivery come from the same pass); the Whisper model is loaded once
+  per configuration and reused across jobs; progress writes are throttled; SQLite runs in WAL mode.
+* Cached renders older than 7 days (or beyond 3 GB per job) and abandoned export temp folders are purged at startup;
+  ZIP exports are deleted from the server right after they are sent.
+* If no clip passes the quality bar, up to 3 best-available clips are returned and clearly flagged "low confidence"
+  instead of an empty result.
+* Android: the editor's playhead no longer recomposes the whole screen during playback.
+
+## Repository layout
+
+```
+android/   Android Studio project (Kotlin, Compose, Room, Media3, WorkManager, OkHttp) + unit tests
+backend/   FastAPI service, clip engine, FFmpeg wrappers, tests, Dockerfile
+docs/      API reference
+assets/    Clipzit logo
+.github/   CI: Android APK build, backend tests
+```
+
+## Build the APK
+
+**GitHub Actions (easiest):** push to GitHub, open *Actions → Android → Run workflow*, download the `Clipzit-apk`
+artifact (`Clipzit.apk`, debug-signed, installable).
+
+**Android Studio:** open the `android/` folder, let Gradle sync (JDK 17), *Build → Build APK(s)*.
+
+**Command line:** `cd android && gradle wrapper --gradle-version 8.9 && ./gradlew assembleDebug`
+(output `android/app/build/outputs/apk/debug/app-debug.apk`). The Gradle wrapper JAR is not committed.
+
+Requirements: JDK 17, Android SDK 34, Gradle 8.9, AGP 8.5.2, Kotlin 1.9.24, Compose BOM 2024.06.00, Media3 1.4.1,
+Room 2.6.1, WorkManager 2.9.1, OkHttp 4.12.0. minSdk 26 (Android 8.0), targetSdk 34.
+
+## Run the backend
+
+```bash
+cd backend
+cp .env.example .env        # set CLIPZIT_API_TOKEN to a long random string
+docker compose -f ../docker-compose.yml up --build      # includes Whisper and OpenCV
+```
+
+Without Docker (needs `ffmpeg` on PATH):
+
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt -r requirements-whisper.txt   # add -r requirements-vision.txt for face framing
+CLIPZIT_DATA_DIR=./data uvicorn clipzit.main:app --host 0.0.0.0 --port 8000
+```
+
+In the app: **Settings → Backend URL** (for example `http://192.168.1.20:8000`) and token → *Test connection*.
+Plain HTTP is allowed so a LAN server works; use HTTPS (reverse proxy) for anything reachable from the internet.
+Variables: `backend/.env.example`. API reference: [docs/API.md](docs/API.md).
+
+## Tests
+
+```bash
+cd backend && python -m unittest discover -s tests -t . -v      # needs ffmpeg
+cd android && gradle testDebugUnitTest                           # framing math, undo history, formatting
+```
+
+Results where this archive was authored: backend **113 tests, 107 passed, 6 skipped** (the FastAPI integration tests).
+They include real FFmpeg renders in every aspect ratio (size, audio and duration checked with ffprobe), pixel checks
+that captions, highlight colour, hook box and clean-preset box are actually drawn, a moving crop window on a static
+test card, pacing cuts with retimed captions, music mixing, enhancement, ZIP export, chunked-upload resume and
+replay protection, persistence across store reopen, retry/cancel/restart recovery, and clip-quality behaviour
+(topic boundaries, sign-off and tangent penalties, boilerplate rejection, duplicate removal, curiosity hooks, distinctive
+topics, story arcs, loudness from real audio, and a realistic creator-style transcript). Android unit tests were written but **not run**.
+
+## Troubleshooting
+
+* *"Cannot reach the backend"*: phone and server on the same network; check URL, port, firewall.
+* *401*: the token in Settings must match `CLIPZIT_API_TOKEN`.
+* *"faster-whisper is not installed"*: install `requirements-whisper.txt` (the Docker image does).
+* *"no speech was detected"*: clips cannot be found in music or silence.
+* *Upload paused*: tap Resume; it continues from the byte the server already has.
+* *"Face framing unavailable"*: install `requirements-vision.txt` (OpenCV 4.x) on the server.
+* *Clip longer than the platform allows*: trim it or switch platform preset.
+* *Playback error on a project*: the source file moved or was deleted; re-import it.

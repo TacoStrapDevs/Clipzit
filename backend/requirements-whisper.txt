@@ -1,0 +1,2 @@
+# Speech-to-text engine (downloads the selected model on first use).
+faster-whisper>=1.0.3,<2.0
